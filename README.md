@@ -1,57 +1,210 @@
-# 🚀 Getting started with Strapi
+# Strapi + TypeScript + Docker + PostgreSQL Boilerplate
 
-Strapi comes with a full featured [Command Line Interface](https://docs.strapi.io/dev-docs/cli) (CLI) which lets you scaffold and manage your project in seconds.
+This repository provides a robust boilerplate to kickstart your full-stack development with Strapi, TypeScript, Docker, and PostgreSQL. It includes a comprehensive setup with all the necessary configurations to streamline your development process and ensure scalability and maintainability.
 
-### `develop`
+## Features
 
-Start your Strapi application with autoReload enabled. [Learn more](https://docs.strapi.io/dev-docs/cli#strapi-develop)
+- **Strapi Integration**: Leverage the powerful headless CMS capabilities of Strapi for building APIs effortlessly.
+- **TypeScript Support**: Benefit from static typing and enhanced code quality with TypeScript.
+- **Dockerized Setup**: Easily manage and deploy your application using Docker, ensuring a consistent environment.
+- **PostgreSQL Database**: Utilize PostgreSQL for a reliable and scalable relational database management system.
+- **Health Check**: Built-in health check for monitoring the application's status.
+- **Environment Variables**: Centralized environment configuration using `.env` file.
 
+## Getting Started
+
+### Prerequisites
+
+- [Docker](https://www.docker.com/get-started)
+- [Docker Compose](https://docs.docker.com/compose/install/)
+
+### Installation
+
+1. **Clone the repository**:
+
+   ```sh
+   git clone https://github.com/your-username/your-repo-name.git
+   cd your-repo-name
+   ```
+
+2. **Create a `.env` file**:
+
+   ```sh
+   cp .env.example .env
+   ```
+
+   Edit the `.env` file to match your configuration.
+
+3. **Build and start the application**:
+
+   ```sh
+   docker-compose up --build
+   ```
+
+4. **Access the Strapi Admin Panel**:
+   Open your browser and navigate to `http://localhost:1337/admin`.
+
+## Docker Configuration
+
+### Dockerfile.local
+
+This file builds our Strapi application's Docker image based on Node.js, specifically using an Alpine Linux variant for a lightweight environment. It installs necessary system dependencies like `vips-dev` for image processing, which Strapi often requires, especially for media handling. The Dockerfile also handles the installation of NPM packages and builds the Strapi project.
+
+```Dockerfile
+# We use node18-alpine3.17 because we must avoid python version 3.11 as it creates issues with sharp library which is needed for file upload
+# https://forum.strapi.io/t/facing-error-on-installation-of-strapi-something-went-wrong-installing-the-sharp-module/16420/29
+FROM node:18-alpine3.17
+
+# Installing libvips-dev for sharp Compatibility
+RUN apk update && apk add --no-cache build-base gcc autoconf automake zlib-dev libpng-dev nasm bash vips-dev
+
+ARG NODE_ENV=development
+ENV NODE_ENV=${NODE_ENV}
+
+WORKDIR /opt/
+
+COPY ./package.json ./
+COPY ./package-lock.json ./
+
+ENV PATH /opt/node_modules/.bin:$PATH
+
+RUN npm install --platform=linux --arch=x64 sharp
+RUN npm install
+
+# Install the pg module
+RUN npm install pg --save
+
+WORKDIR /opt/app
+
+COPY ./ .
+
+RUN npm run build
+
+EXPOSE 1337
+
+CMD ["npm", "run", "develop"]
 ```
-npm run develop
-# or
-yarn develop
+
+### Docker Compose Setup
+
+In our `docker-compose.yml`, we define the services required for our application: the Strapi service and a PostgreSQL service. Docker Compose allows us to manage multiple containers as a single application.
+
+```yaml
+version: "3"
+services:
+  strapi-app:
+    container_name: strapi-app
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    image: strapi:latest
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --spider --quiet --tries=1 --timeout=5 http://localhost:1337/_health || exit 1",
+        ]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 0s
+    env_file: .env
+    environment:
+      DATABASE_CLIENT: ${DATABASE_CLIENT}
+      DATABASE_HOST: strapi-db
+      DATABASE_PORT: ${DATABASE_PORT}
+      DATABASE_NAME: ${DATABASE_NAME}
+      DATABASE_USERNAME: ${DATABASE_USERNAME}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET}
+      APP_KEYS: ${APP_KEYS}
+    volumes:
+      - ./config:/opt/app/config
+      - ./src:/opt/app/src
+      - ./package.json:/opt/package.json
+      - ./public/uploads:/opt/app/public/uploads
+    ports:
+      - "1337:1337"
+    networks:
+      - strapi-app-network
+    depends_on:
+      - strapi-db
+
+  strapi-db:
+    container_name: strapi-db
+    platform: linux/amd64
+    restart: unless-stopped
+    env_file: .env
+    image: postgres:15.1-alpine
+    environment:
+      POSTGRES_USER: ${DATABASE_USERNAME}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME}
+    volumes:
+      - strapi-app-data:/var/lib/postgresql/data/
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - strapi-app-network
+
+volumes:
+  strapi-app-data:
+
+networks:
+  strapi-app-network:
+    driver: bridge
 ```
 
-### `start`
+## TypeScript Configuration
 
-Start your Strapi application with autoReload disabled. [Learn more](https://docs.strapi.io/dev-docs/cli#strapi-start)
+To use TypeScript in Strapi, we configure it through a `tsconfig.json` file. This configuration file allows us to specify compiler options and include/exclude files for our project.
 
+### `tsconfig.json`
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "module": "commonjs",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*.ts", "src/**/*.js"],
+  "exclude": ["node_modules", "build", "dist"]
+}
 ```
-npm run start
-# or
-yarn start
+
+### `tsconfig.jest.json`
+
+We also have a separate configuration for handling Jest tests.
+
+```json
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs"
+  },
+  "include": ["tests/**/*.ts", "tests/**/*.js"]
+}
 ```
 
-### `build`
+## Contributing
 
-Build your admin panel. [Learn more](https://docs.strapi.io/dev-docs/cli#strapi-build)
+Contributions are welcome! Please fork the repository and submit a pull request with your changes.
 
-```
-npm run build
-# or
-yarn build
-```
+## Feedback
 
-## ⚙️ Deployment
+If you find this boilerplate useful, don't forget to star the repository ⭐ and share your thoughts through comments! Your feedback helps us improve and grow. ❤️
 
-Strapi gives you many possible deployment options for your project including [Strapi Cloud](https://cloud.strapi.io). Browse the [deployment section of the documentation](https://docs.strapi.io/dev-docs/deployment) to find the best solution for your use case.
+## License
 
-## 📚 Learn more
-
-- [Resource center](https://strapi.io/resource-center) - Strapi resource center.
-- [Strapi documentation](https://docs.strapi.io) - Official Strapi documentation.
-- [Strapi tutorials](https://strapi.io/tutorials) - List of tutorials made by the core team and the community.
-- [Strapi blog](https://strapi.io/blog) - Official Strapi blog containing articles made by the Strapi team and the community.
-- [Changelog](https://strapi.io/changelog) - Find out about the Strapi product updates, new features and general improvements.
-
-Feel free to check out the [Strapi GitHub repository](https://github.com/strapi/strapi). Your feedback and contributions are welcome!
-
-## ✨ Community
-
-- [Discord](https://discord.strapi.io) - Come chat with the Strapi community including the core team.
-- [Forum](https://forum.strapi.io/) - Place to discuss, ask questions and find answers, show your Strapi project and get feedback or just talk with other Community members.
-- [Awesome Strapi](https://github.com/strapi/awesome-strapi) - A curated list of awesome things related to Strapi.
-
----
-
-<sub>🤫 Psst! [Strapi is hiring](https://strapi.io/careers).</sub>
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
